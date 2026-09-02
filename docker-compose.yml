@@ -1,0 +1,11 @@
+services:
+  api-txt:
+    build: .
+    container_name: gps-api-txt
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./app:/app/app  # live code mount for local dev; remove for production
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
