@@ -60,12 +60,48 @@ def run_pipeline(message: str) -> PipelineResult:
 
     # TXT-01: clean / compliant
     if not categories:
+        wc = word_count(message)
+
+        # Content is clean, and within the platform's word cap (BRD 6.1:
+        # "~20 words, hard cap 30") — pass through unchanged.
+        if wc <= MAX_WORD_COUNT:
+            return PipelineResult(
+                decision="allow",
+                final_message=message.strip(),
+                categories=[],
+                confidence=confidence,
+                word_count=wc,
+                guidance=None,
+            )
+
+        # Content is clean but OVER the word cap. The cap applies to every
+        # outgoing message, not just ones that tripped a moderation
+        # category, so this still needs to go through rewrite — shortening
+        # only, no content issue to flag. `["length"]` is a synthetic,
+        # non-moderation category (see rewrite.py / schemas.py) so the
+        # response doesn't misleadingly imply profanity/hate/etc.
+        rewritten = rewrite_message(message, ["length"])
+        rw_wc = word_count(rewritten)
+
+        if rw_wc > MAX_WORD_COUNT:
+            # Shouldn't normally happen — rewrite_message enforces the cap
+            # itself — but kept as a backstop (mirrors the TXT-07 check
+            # further down for the moderation-triggered rewrite path).
+            return PipelineResult(
+                decision="reject",
+                final_message=None,
+                categories=["length_exceeded"],
+                confidence=confidence,
+                word_count=rw_wc,
+                guidance=f"Message exceeds the {MAX_WORD_COUNT}-word limit. Please shorten and resubmit.",
+            )
+
         return PipelineResult(
-            decision="allow",
-            final_message=message.strip(),
-            categories=[],
+            decision="rewrite",
+            final_message=rewritten,
+            categories=["length"],
             confidence=confidence,
-            word_count=word_count(message),
+            word_count=rw_wc,
             guidance=None,
         )
 

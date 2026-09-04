@@ -16,6 +16,10 @@ class Category(str, Enum):
     sexual = "sexual"
     aggressive = "aggressive"
     ambiguous = "ambiguous"
+    # Clean content that was shortened only because it exceeded the word
+    # cap — distinct from length_exceeded, which means shortening wasn't
+    # enough and the message was rejected.
+    length = "length"
     length_exceeded = "length_exceeded"
     unsupported_language = "unsupported_language"
     invalid_input = "invalid_input"
