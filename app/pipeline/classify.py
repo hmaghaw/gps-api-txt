@@ -1,8 +1,17 @@
 """
-Stage 3: Classification (BRD TXT-01..TXT-06).
+Stage 2+3 (combined): Language detection + moderation classification.
 
-Calls OpenAI to flag moderation categories and a confidence score for a
-message. Replaces the earlier always-clean stub.
+A single OpenAI call now does both jobs that used to be two pipeline
+stages: detect the message's language (ISO 639-1 code + confidence), and
+flag moderation categories (profanity, hate, sexual, aggressive) + an
+overall confidence — evaluated IN the detected language, not assumed to be
+English. One round-trip instead of two, and the categories are defined
+abstractly (not via English example word lists) so the same prompt applies
+regardless of which language the message turns out to be in.
+
+decide.py is responsible for checking the detected language against
+SUPPORTED_LANGUAGES (app/languages.py) before trusting the moderation
+categories — this module only reports what it found.
 """
 
 import json
@@ -16,31 +25,45 @@ ALLOWED_CATEGORIES = {"profanity", "hate", "sexual", "aggressive"}
 SYSTEM_PROMPT = (
     "You are a content moderation classifier for SMS/MMS marketing messages "
     "sent by small businesses to nearby customers on a geo-targeted offers "
-    "platform. Given a message, decide which of these categories apply: "
-    "profanity, hate, sexual, aggressive.\n"
+    "platform. The platform supports multiple languages, so first identify "
+    "the message's language, then evaluate it for moderation issues IN "
+    "THAT LANGUAGE — do not assume English, and do not require translation "
+    "to English before evaluating.\n\n"
+    "Step 1 - language: identify the message's primary language as an "
+    "ISO 639-1 two-letter code (e.g. 'en', 'es', 'fr', 'ar'). If you cannot "
+    "confidently identify a real language (e.g. gibberish, a single emoji, "
+    "mixed nonsense), use 'unknown' with low confidence.\n\n"
+    "Step 2 - moderation: decide which of these categories apply, "
+    "evaluated in the message's own language and cultural context:\n"
     "- profanity: swearing / foul language\n"
     "- hate: racist or discriminatory wording\n"
     "- sexual: sexual or suggestive content\n"
     "- aggressive: aggressive or threatening phrasing\n"
-    "A clean, professional marketing message has no categories flagged.\n"
+    "A clean, professional marketing message has no categories flagged.\n\n"
     "Respond with ONLY a JSON object, no other text, in this exact shape:\n"
-    '{"categories": ["<subset of the four above>"], "confidence": <0.0-1.0>}\n'
-    "confidence is your confidence in this classification overall, not per-category."
+    '{"language": "<ISO 639-1 code or unknown>", "language_confidence": <0.0-1.0>, '
+    '"categories": ["<subset of the four above>"], "confidence": <0.0-1.0>}\n'
+    "confidence is your confidence in the moderation classification overall, "
+    "not per-category. language_confidence is separate and reflects only "
+    "how sure you are of the detected language."
 )
 
 
 @dataclass
 class ClassificationResult:
+    language: str = "unknown"  # ISO 639-1 code, or "unknown"
+    language_confidence: float = 0.0
     categories: list[str] = field(default_factory=list)  # subset of: profanity, hate, sexual, aggressive
-    confidence: float = 1.0  # confidence in the classification itself
+    confidence: float = 1.0  # confidence in the moderation classification itself
 
 
 def classify_message(text: str) -> ClassificationResult:
     """
     Calls the OpenAI chat completions API with a JSON-mode system prompt and
-    parses the structured result. On any failure (missing key, network
-    error, malformed response), fails closed rather than silently allowing
-    unmoderated content through — see the except branch below.
+    parses the structured result (language + moderation categories in one
+    round-trip). On any failure (missing key, network error, malformed
+    response), fails closed rather than silently allowing unmoderated or
+    unlanguage-checked content through — see the except branch below.
     """
     try:
         client = get_client()
@@ -56,17 +79,28 @@ def classify_message(text: str) -> ClassificationResult:
         raw = response.choices[0].message.content or "{}"
         data = json.loads(raw)
 
-        categories = [c for c in data.get("categories", []) if c in ALLOWED_CATEGORIES]
-        confidence = float(data.get("confidence", 0.0))
-        confidence = max(0.0, min(1.0, confidence))
+        language = str(data.get("language", "unknown")).strip().lower() or "unknown"
+        language_confidence = max(0.0, min(1.0, float(data.get("language_confidence", 0.0))))
 
-        return ClassificationResult(categories=categories, confidence=confidence)
+        categories = [c for c in data.get("categories", []) if c in ALLOWED_CATEGORIES]
+        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.0))))
+
+        return ClassificationResult(
+            language=language,
+            language_confidence=language_confidence,
+            categories=categories,
+            confidence=confidence,
+        )
     except Exception:
-        # Fail closed: an empty categories list would route straight to
-        # "allow" in decide.py regardless of confidence, so on error we
-        # return a non-empty, non-hard-reject category with confidence 0.0.
-        # That routes through decide.py's TXT-06 ambiguous-content branch
-        # (AMBIGUOUS_POLICY) instead of silently allowing the message
-        # through — flip AMBIGUOUS_POLICY in config.py if "rewrite" is the
-        # preferred failure mode instead of "reject".
-        return ClassificationResult(categories=["aggressive"], confidence=0.0)
+        # Fail closed on BOTH axes: unknown language (so the language gate
+        # in decide.py rejects it rather than guessing) and a non-empty,
+        # non-hard-reject moderation category with confidence 0.0 (so even
+        # if the language gate were somehow bypassed, decide.py's
+        # ambiguous-content branch still catches it instead of silently
+        # allowing the message through).
+        return ClassificationResult(
+            language="unknown",
+            language_confidence=0.0,
+            categories=["aggressive"],
+            confidence=0.0,
+        )

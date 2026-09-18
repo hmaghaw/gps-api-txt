@@ -32,6 +32,29 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
 OPENAI_REQUEST_TIMEOUT = float(os.getenv("OPENAI_REQUEST_TIMEOUT", "20"))
 
+# --- Multi-language support ---
+# The set of languages this deployment currently accepts. Anything the
+# detector reports outside this set is rejected on language grounds,
+# exactly as English-only was rejected before. Change this to add/remove
+# languages without touching code — but every code listed here must have a
+# matching entry in languages.json (see app/languages.py), which is
+# validated at startup.
+SUPPORTED_LANGUAGES = {
+    code.strip().lower()
+    for code in os.getenv("SUPPORTED_LANGUAGES", "en").split(",")
+    if code.strip()
+}
+
+# Used only for messages/labels where a single "primary" language is useful
+# (e.g. docs, default UI copy). Does not affect which languages are accepted
+# — that's controlled entirely by SUPPORTED_LANGUAGES.
+DEFAULT_LANGUAGE = os.getenv("DEFAULT_LANGUAGE", "en").strip().lower()
+
+# Minimum confidence the language-detection step must report before its
+# result is trusted. Below this, the message is rejected as unsupported
+# rather than risking moderation/rewrite in the wrong language.
+LANG_CONFIDENCE_THRESHOLD = float(os.getenv("LANG_CONFIDENCE_THRESHOLD", "0.6"))
+
 # --- TXT-06: confidence threshold for ambiguous / borderline content ---
 # Below this, content is treated as low-confidence and routed per
 # AMBIGUOUS_POLICY. At/above this, the classifier's flagged category applies

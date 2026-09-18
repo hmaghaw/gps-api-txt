@@ -1,0 +1,17 @@
+{
+  "en": {
+    "name": "English",
+    "max_words": 30,
+    "target_words": 20,
+    "rewrite_enabled": true,
+    "moderation_confidence_threshold": 0.7
+  },
+  "ar": {
+    "name": "Arabic",
+    "max_words": 30,
+    "target_words": 20,
+    "rewrite_enabled": true,
+    "moderation_confidence_threshold": 0.75,
+    "rtl": true
+  }
+}
