@@ -5,7 +5,7 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - ./app:/app/app  # live code mount for local dev; remove for production
+      - .:/app
     env_file:
       - .env
     environment:
